@@ -1,3 +1,4 @@
+<img width="1080" height="2400" alt="Screenshot_20260811_000952_Root My Galaxy" src="https://github.com/user-attachments/assets/d17ca3f1-237d-4445-991e-42cff7e3de40" />
 # Root My Galaxy
 
 <img width="108" height="108" alt="sprout_icon_108" src="https://github.com/user-attachments/assets/2ba0e360-0876-489c-b256-f75df7589785" />
@@ -15,6 +16,9 @@ The device feed and native payloads are maintained in
 
 ## Application
 
+<img width="200" alt="Screenshot_20260811_001033_Root My Galaxy" src="https://github.com/user-attachments/assets/e02f39a6-b9a0-48f7-bd0e-2b5ff2a8ab7f" />
+<img width="200" alt="Screenshot_20260811_001008_Root My Galaxy" src="https://github.com/user-attachments/assets/0ca51cc8-8da1-4b29-abcf-062fee484a54" />
+<img width="200" alt="Screenshot_20260811_000952_Root My Galaxy" src="https://github.com/user-attachments/assets/66eb9e7b-8d1a-4f17-8abe-f7b91e77a59c" />
 
 <img width="200" alt="KakaoTalk_20260718_170922353" src="https://github.com/user-attachments/assets/3f562ea4-8c39-4ade-bfd3-93eea1a1cc24" />
 <img width="200" alt="KakaoTalk_20260718_171127319" src="https://github.com/user-attachments/assets/8dde0443-12cf-4058-ba76-0337aefb92a0" />
