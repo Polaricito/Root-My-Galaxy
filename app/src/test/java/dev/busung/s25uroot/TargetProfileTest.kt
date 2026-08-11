@@ -34,6 +34,8 @@ class TargetProfileTest {
         model = model,
         device = "unused",
         kernelRelease = kernelRelease,
+        kernelVersionInfo = "unused",
+        machine = "unused",
         buildId = "BP4A.251205.006.S938BCZG1",
         fingerprint = "samsung/example",
         androidRelease = "16",

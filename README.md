@@ -29,10 +29,27 @@ and kernel-version warnings.
 
 Requirements:
 
-- Android Studio JBR 21
-- Android SDK 37
+- JDK 21
+- Android SDK 37 (`platforms;android-37.0`)
 - Android NDK 28 or newer
 - CMake 3.22.1
+
+Point Gradle at your SDK by setting `sdk.dir` in `local.properties`, or export
+`ANDROID_HOME` (or `ANDROID_SDK_ROOT`) before building.
+
+### Linux / macOS
+
+```bash
+# One-time setup (adjust the SDK path as needed)
+export JAVA_HOME="$JAVA_HOME"        # e.g. /usr/lib/jvm/java-21-openjdk
+export ANDROID_HOME="$HOME/Android/Sdk"
+export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+sdkmanager --install "platform-tools" "platforms;android-37.0" "build-tools;36.0.0" "cmake;3.22.1" "ndk;28.0.13004108"
+
+./gradlew :app:assembleDebug
+```
+
+### Windows
 
 ```powershell
 $env:JAVA_HOME='C:\Program Files\Android\Android Studio\jbr'
