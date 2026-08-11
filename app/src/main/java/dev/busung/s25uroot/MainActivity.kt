@@ -1633,7 +1633,7 @@ private fun SettingsPage(
                 icon = Icons.Rounded.Link,
                 title = stringResource(R.string.payload_repository),
                 description = stringResource(R.string.payload_repository_description),
-                value = "$payloadRepository @ $payloadBranch",
+                valueBelow = "$payloadRepository @ $payloadBranch",
                 onClick = {
                     clickHaptic(view)
                     showPayloadRepositoryDialog = true
@@ -2032,7 +2032,8 @@ private fun SettingsCard(
     icon: ImageVector,
     title: String,
     description: String,
-    value: String,
+    value: String = "",
+    valueBelow: String? = null,
     position: SettingsCardPosition = SettingsCardPosition.Single,
     onClick: () -> Unit,
 ) {
@@ -2050,28 +2051,42 @@ private fun SettingsCard(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
         ),
     ) {
-        Row(
+        Column(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 15.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Icon(icon, contentDescription = null, modifier = Modifier.size(28.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.titleMedium)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Icon(icon, contentDescription = null, modifier = Modifier.size(28.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(title, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        description,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (valueBelow == null && value.isNotBlank()) {
+                    Text(
+                        value,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                    )
+                }
+            }
+            if (valueBelow != null) {
+                Spacer(Modifier.height(10.dp))
                 Text(
-                    description,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    valueBelow,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
-            Text(
-                value,
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-                maxLines = 1,
-            )
         }
     }
 }
