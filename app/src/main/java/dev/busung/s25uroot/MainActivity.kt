@@ -1616,29 +1616,30 @@ private fun SettingsPage(
         }
         item { SectionLabel(stringResource(R.string.advanced)) }
         item {
-            SettingsSwitchCard(
-                icon = Icons.Rounded.Memory,
-                title = stringResource(R.string.advanced_mode),
-                description = stringResource(R.string.advanced_mode_description),
-                checked = advancedMode,
-                onCheckedChange = {
-                    clickHaptic(view)
-                    onAdvancedModeChanged(it)
-                },
-            )
-        }
-        item { SectionLabel(stringResource(R.string.payload_source)) }
-        item {
-            SettingsCard(
-                icon = Icons.Rounded.Link,
-                title = stringResource(R.string.payload_repository),
-                description = stringResource(R.string.payload_repository_description),
-                valueBelow = "$payloadRepository @ $payloadBranch",
-                onClick = {
-                    clickHaptic(view)
-                    showPayloadRepositoryDialog = true
-                },
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                SettingsSwitchCard(
+                    icon = Icons.Rounded.Memory,
+                    title = stringResource(R.string.advanced_mode),
+                    description = stringResource(R.string.advanced_mode_description),
+                    checked = advancedMode,
+                    position = SettingsCardPosition.Top,
+                    onCheckedChange = {
+                        clickHaptic(view)
+                        onAdvancedModeChanged(it)
+                    },
+                )
+                SettingsCard(
+                    icon = Icons.Rounded.Link,
+                    title = stringResource(R.string.payload_repository),
+                    description = stringResource(R.string.payload_repository_description),
+                    valueBelow = "$payloadRepository @ $payloadBranch",
+                    position = SettingsCardPosition.Bottom,
+                    onClick = {
+                        clickHaptic(view)
+                        showPayloadRepositoryDialog = true
+                    },
+                )
+            }
         }
         item { SectionLabel(stringResource(R.string.about)) }
         item {

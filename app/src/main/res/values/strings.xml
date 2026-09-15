@@ -139,7 +139,6 @@
     <string name="advanced">Advanced</string>
     <string name="advanced_mode">Advanced mode</string>
     <string name="advanced_mode_description">Manually choose a device-compatible payload during installation</string>
-    <string name="payload_source">Payload source</string>
     <string name="payload_repository">Payload repository</string>
     <string name="payload_repository_description">GitHub repository that provides the payload catalog and files</string>
     <string name="payload_repository_title">Change payload repository</string>
