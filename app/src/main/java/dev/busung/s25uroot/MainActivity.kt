@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.view.HapticFeedbackConstants
 import android.view.View
 import android.widget.Toast
@@ -84,6 +85,7 @@ import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.Save
 import androidx.compose.material.icons.rounded.Schedule
+import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.AlertDialog
@@ -169,6 +171,8 @@ class MainActivity : ComponentActivity() {
     private var shizukuMode by mutableStateOf(false)
     private var payloadRepository by mutableStateOf("")
     private var payloadBranch by mutableStateOf("")
+    private var autoRunOnBoot by mutableStateOf(false)
+    private var bootDelay by mutableStateOf(0)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -180,6 +184,9 @@ class MainActivity : ComponentActivity() {
         shizukuMode = AppPreferences.shizukuMode(this)
         payloadRepository = AppPreferences.payloadRepository(this)
         payloadBranch = AppPreferences.payloadBranch(this)
+        autoRunOnBoot = AppPreferences.autoRunOnBoot(this)
+        bootDelay = AppPreferences.bootDelay(this)
+        handleAutoRunIntent(intent)
         setContent {
             RootMyGalaxyTheme(accentColor = accentColor, themeMode = themeMode) {
                 RootApp(
@@ -214,6 +221,24 @@ class MainActivity : ComponentActivity() {
                         AppPreferences.setPayloadBranch(this, branch)
                         payloadBranch = branch
                     },
+                    autoRunOnBoot = autoRunOnBoot,
+                    bootDelay = bootDelay,
+                    onAutoRunOnBootChanged = { enabled ->
+                        AppPreferences.setAutoRunOnBoot(this, enabled)
+                        autoRunOnBoot = enabled
+                        if (enabled) {
+                            BootReceiver.schedule(this, bootDelay)
+                        } else {
+                            BootReceiver.cancel(this)
+                        }
+                    },
+                    onBootDelayChanged = { delay ->
+                        AppPreferences.setBootDelay(this, delay)
+                        bootDelay = delay
+                        if (autoRunOnBoot) {
+                            BootReceiver.schedule(this, delay)
+                        }
+                    },
                     openInstaller = { profileId ->
                         val installer = Intent(this, InstallActivity::class.java)
                             .putExtra(InstallActivity.EXTRA_INSTALL_REQUEST_ID, UUID.randomUUID().toString())
@@ -230,6 +255,24 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         if (resumedOnce) installViewModel.refresh() else resumedOnce = true
+    }
+
+    private fun handleAutoRunIntent(intent: Intent) {
+        if (intent.action == BootReceiver.ACTION_AUTO_RUN && autoRunOnBoot) {
+            // CRITICAL FIX: Disable auto-run BEFORE the exploit runs
+            // This prevents bootloop if the exploit triggers a reboot
+            AppPreferences.setAutoRunOnBoot(this, false)
+            BootReceiver.cancel(this)
+            // Save boot_id for failsafe check after exploit
+            AutoRunManager.saveBootIdBeforeExploit(this)
+            AutoRunManager.incrementAttemptCounter(this)
+            AutoRunManager.setAutoRunTriggered(this, true)
+            val requestId = UUID.randomUUID().toString()
+            val installer = Intent(this, InstallActivity::class.java)
+                .putExtra(InstallActivity.EXTRA_INSTALL_REQUEST_ID, requestId)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(installer)
+        }
     }
 }
 
@@ -300,12 +343,16 @@ private fun RootApp(
     shizukuMode: Boolean,
     payloadRepository: String,
     payloadBranch: String,
+    autoRunOnBoot: Boolean,
+    bootDelay: Int,
     onAccentColorChanged: (AccentColor) -> Unit,
     onThemeModeChanged: (AppThemeMode) -> Unit,
     onAdvancedModeChanged: (Boolean) -> Unit,
     onShizukuModeChanged: (Boolean) -> Unit,
     onPayloadRepositoryChanged: (String) -> Unit,
     onPayloadBranchChanged: (String) -> Unit,
+    onAutoRunOnBootChanged: (Boolean) -> Unit,
+    onBootDelayChanged: (Int) -> Unit,
     openInstaller: (String?) -> Unit,
 ) {
     val installState by installViewModel.state.collectAsStateWithLifecycle()
@@ -527,6 +574,8 @@ private fun RootApp(
                     shizukuMode = shizukuMode,
                     payloadRepository = payloadRepository,
                     payloadBranch = payloadBranch,
+                    autoRunOnBoot = autoRunOnBoot,
+                    bootDelay = bootDelay,
                     updateStatus = updateStatus,
                     onCheckForUpdate = checkForUpdate,
                     onStartDownload = startDownload,
@@ -536,6 +585,8 @@ private fun RootApp(
                     onShizukuModeChanged = onShizukuModeChanged,
                     onPayloadRepositoryChanged = onPayloadRepositoryChanged,
                     onPayloadBranchChanged = onPayloadBranchChanged,
+                    onAutoRunOnBootChanged = onAutoRunOnBootChanged,
+                    onBootDelayChanged = onBootDelayChanged,
                 )
             }
         }
@@ -1449,6 +1500,10 @@ private fun SettingsPage(
     onShizukuModeChanged: (Boolean) -> Unit,
     onPayloadRepositoryChanged: (String) -> Unit,
     onPayloadBranchChanged: (String) -> Unit,
+    autoRunOnBoot: Boolean,
+    bootDelay: Int,
+    onAutoRunOnBootChanged: (Boolean) -> Unit,
+    onBootDelayChanged: (Int) -> Unit,
 ) {
     val context = LocalContext.current
     val view = LocalView.current
@@ -1458,10 +1513,12 @@ private fun SettingsPage(
     var showAboutDialog by remember { mutableStateOf(false) }
     var showShizukuMissingDialog by remember { mutableStateOf(false) }
     var showPayloadRepositoryDialog by remember { mutableStateOf(false) }
+    var showBootDelayDialog by remember { mutableStateOf(false) }
     var languageMenuTop by remember { mutableStateOf(32.dp) }
     var colorMenuTop by remember { mutableStateOf(32.dp) }
     val density = LocalDensity.current
     val currentLanguageTag = AppPreferences.languageTag(context)
+    var bootDelayValue by remember { mutableStateOf<Int>(bootDelay) }
 
     if (showShizukuMissingDialog) {
         AlertDialog(
@@ -1503,6 +1560,27 @@ private fun SettingsPage(
                 showPayloadRepositoryDialog = false
                 onPayloadRepositoryChanged(repository)
                 onPayloadBranchChanged(branch)
+            },
+        )
+    }
+
+    if (showBootDelayDialog) {
+        BootDelayDialog(
+            currentDelay = bootDelayValue,
+            minDelay = AppPreferences.MIN_BOOT_DELAY,
+            maxDelay = AppPreferences.MAX_BOOT_DELAY,
+            onDismiss = { showBootDelayDialog = false },
+            onConfirm = { delay ->
+                bootDelayValue = delay
+                showBootDelayDialog = false
+                onBootDelayChanged(delay)
+                if (autoRunOnBoot) {
+                    BootReceiver.schedule(context, delay)
+                } else {
+                    // Enabling auto-run from dialog
+                    onAutoRunOnBootChanged(true)
+                    BootReceiver.schedule(context, delay)
+                }
             },
         )
     }
@@ -1626,6 +1704,53 @@ private fun SettingsPage(
                     onCheckedChange = {
                         clickHaptic(view)
                         onAdvancedModeChanged(it)
+                    },
+                )
+                SettingsSwitchCard(
+                    icon = Icons.Rounded.Schedule,
+                    title = stringResource(R.string.auto_run_on_boot),
+                    description = if (autoRunOnBoot) {
+                        stringResource(R.string.auto_run_summary_on)
+                    } else {
+                        stringResource(R.string.auto_run_summary_off)
+                    },
+                    checked = autoRunOnBoot,
+                    position = SettingsCardPosition.Middle,
+                    onCheckedChange = {
+                        clickHaptic(view)
+                        if (it) {
+                            // Show the boot delay dialog before enabling
+                            showBootDelayDialog = true
+                        } else {
+                            BootReceiver.cancel(context)
+                            onAutoRunOnBootChanged(false)
+                        }
+                    },
+                )
+                SettingsCard(
+                    icon = Icons.Rounded.Timer,
+                    title = stringResource(R.string.boot_delay),
+                    description = stringResource(R.string.boot_delay_description),
+                    valueBelow = stringResource(R.string.boot_delay_seconds, bootDelay),
+                    position = SettingsCardPosition.Middle,
+                    onClick = {
+                        clickHaptic(view)
+                        showBootDelayDialog = true
+                    },
+                )
+                SettingsSwitchCard(
+                    icon = Icons.Rounded.Save,
+                    title = stringResource(R.string.payloads_save),
+                    description = if (AppPreferences.payloadsSaveEnabled(context)) {
+                        stringResource(R.string.payloads_save_summary)
+                    } else {
+                        stringResource(R.string.payloads_save_summary_off)
+                    },
+                    checked = AppPreferences.payloadsSaveEnabled(context),
+                    position = SettingsCardPosition.Middle,
+                    onCheckedChange = {
+                        clickHaptic(view)
+                        AppPreferences.setPayloadsSaveEnabled(context, it)
                     },
                 )
                 SettingsCard(

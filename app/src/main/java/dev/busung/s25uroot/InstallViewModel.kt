@@ -1,6 +1,9 @@
 package dev.busung.s25uroot
 
 import android.app.Application
+import android.content.ComponentName
+import android.content.Context
+import android.content.pm.PackageManager
 import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -14,6 +17,7 @@ import kotlinx.coroutines.launch
 import java.io.File
 import java.io.InputStream
 import java.security.MessageDigest
+import java.util.concurrent.TimeUnit
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
@@ -27,11 +31,18 @@ enum class InstallPhase {
     Failed,
 }
 
+enum class InstallStability {
+    Unknown,
+    Stable,
+    Unstable,
+}
+
 data class InstallUiState(
     val phase: InstallPhase = InstallPhase.Checking,
     val message: String = "",
     val probeOutput: String = "",
     val log: String = "",
+    val stability: InstallStability = InstallStability.Unknown,
 ) {
     val busy: Boolean
         get() = phase in setOf(
@@ -41,6 +52,8 @@ data class InstallUiState(
             InstallPhase.LoadingKernelSu,
         )
 
+    val systemStable: Boolean
+        get() = stability == InstallStability.Stable
 }
 
 data class TargetCatalogUiState(
@@ -101,13 +114,53 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         mutableHistory.value = historyStore.load()
         discoveryJob?.cancel()
         discoveryJob = viewModelScope.launch(Dispatchers.IO) {
-            val probe = NativeProbe.run()
-            if (detectInstalled()) {
+            val nativeAvailable = NativeProbe.isAvailable()
+            val probe = if (nativeAvailable) runCatching { NativeProbe.run() }.getOrNull() ?: "" else ""
+            val installed = if (nativeAvailable) runCatching { detectInstalled() }.getOrNull() ?: false else false
+            if (installed) {
+                val systemStable = runCatching { isSystemUiAlive() }.getOrNull() ?: true
                 mutableState.value = InstallUiState(
                     phase = InstallPhase.Installed,
-                    message = app.getString(R.string.status_ksu_active),
+                    message = if (systemStable) app.getString(R.string.status_ksu_active) else app.getString(R.string.status_system_unstable),
                     probeOutput = probe,
                     log = probe,
+                    stability = if (systemStable) InstallStability.Stable else InstallStability.Unstable,
+                )
+                return@launch
+            }
+            // Check if an exploit was interrupted by a reboot
+            val interrupted = runCatching { AutoRunManager.checkAndHandleBootloop(app) }.getOrNull() == true
+            if (interrupted) {
+                val profile = try { repository.resolveTarget(DeviceSnapshot.current()) } catch (_: Throwable) { null }
+                val interruptedLog = buildString {
+                    append(probe)
+                    if (profile != null) append("\n${app.getString(R.string.log_profile, profile.profileId)}")
+                    append("\n${app.getString(R.string.log_exploit_interrupted)}")
+                }
+                mutableState.value = InstallUiState(
+                    phase = InstallPhase.Failed,
+                    message = app.getString(R.string.status_install_failed),
+                    probeOutput = probe,
+                    log = interruptedLog,
+                    stability = InstallStability.Unknown,
+                )
+                return@launch
+            }
+            // Check if an exploit is actively running (e.g., auto-run triggered on boot)
+            val running = runCatching { isExploitRunning() }.getOrNull() ?: false
+            if (running) {
+                val profile = try { repository.resolveTarget(DeviceSnapshot.current()) } catch (_: Throwable) { null }
+                val runningLog = buildString {
+                    append(probe)
+                    if (profile != null) append("\n${app.getString(R.string.log_profile, profile.profileId)}")
+                    append("\n[*] ${app.getString(R.string.status_exploit_running)}")
+                }
+                mutableState.value = InstallUiState(
+                    phase = InstallPhase.Exploiting,
+                    message = app.getString(R.string.status_exploit_running),
+                    probeOutput = probe,
+                    log = runningLog,
+                    stability = InstallStability.Unknown,
                 )
                 return@launch
             }
@@ -171,6 +224,8 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             // exploit and the KernelSU staging steps.
             activeRunShizuku = AppPreferences.shizukuMode(app)
             try {
+                // Boot_id was already saved by handleAutoRunIntent before enabling the exploit.
+                // Do NOT save again here - it would overwrite the saved value.
                 if (shizukuEnabled()) {
                     appendLog(app.getString(R.string.log_shizuku_prepare))
                     if (!ShizukuController.isRunning() && !ShizukuController.pingUntilRunning()) {
@@ -190,6 +245,31 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 appendLog(app.getString(R.string.log_profile, profile.profileId))
                 updateHistoryProfile(profile.profileId)
 
+                // Check for cached payloads before downloading
+                val hasCachedPayloads = repository.payloadsExistLocally(profile.profileId)
+                if (hasCachedPayloads) {
+                    appendLog(app.getString(R.string.payloads_cached))
+                    val cachedPayloads = repository.getLocalPayloads(profile.profileId)
+                    if (cachedPayloads != null) {
+                        // Use cached payloads
+                        setPhase(InstallPhase.Exploiting, app.getString(R.string.status_exploit_running))
+                        executeExploit(cachedPayloads.exploit)
+                        setPhase(InstallPhase.LoadingKernelSu, app.getString(R.string.status_ksu_loading))
+                        installKernelSu(cachedPayloads)
+                        setPhase(InstallPhase.Installed, app.getString(R.string.status_ksu_active))
+                        appendLog(app.getString(R.string.log_install_complete))
+                        finishHistory(InstallRunResult.Succeeded)
+                        AutoRunManager.recordSuccess(app)
+                        AutoRunManager.resetAttemptCounter(app)
+                        // Only enable auto-run if root is confirmed active AND
+                        // the system passed the stability check
+                        if (detectInstalled() && mutableState.value.systemStable) {
+                            AppPreferences.setAutoRunOnBoot(app, true)
+                        }
+                        return@launch
+                    }
+                }
+
                 setPhase(InstallPhase.Downloading, app.getString(R.string.status_downloading_payload))
                 val payloads = repository.download(profile) { appendLog("[*] $it") }
                 appendLog(app.getString(R.string.log_download_verified))
@@ -203,10 +283,24 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 setPhase(InstallPhase.Installed, app.getString(R.string.status_ksu_active))
                 appendLog(app.getString(R.string.log_install_complete))
                 finishHistory(InstallRunResult.Succeeded)
+                AutoRunManager.recordSuccess(app)
+                AutoRunManager.resetAttemptCounter(app)
+                // Only enable auto-run if root is confirmed active AND
+                // the system passed the stability check. If the payload
+                // broke SystemUI or other system components, auto-run stays
+                // disabled to prevent further damage on reboot.
+                if (detectInstalled() && mutableState.value.systemStable) {
+                    AppPreferences.setAutoRunOnBoot(app, true)
+                }
+                // If root not detected or system is unstable, auto-run stays disabled
             } catch (error: Throwable) {
                 appendLog("[-] ${error.message ?: error.javaClass.simpleName}")
                 setPhase(InstallPhase.Failed, app.getString(R.string.status_install_failed))
                 finishHistory(InstallRunResult.Failed)
+                // Bootloop failsafe: if device rebooted unexpectedly during exploit,
+                // auto-run was already disabled by handleAutoRunIntent before the exploit ran.
+                // This check catches any remaining edge cases.
+                AutoRunManager.checkAndHandleBootloop(app)
             } finally {
                 activeRunShizuku = null
             }
@@ -288,6 +382,16 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             // Both transports drain into `captured` during the poll loop, so
             // this never blocks on a child still holding the pipe open.
             val earlyOutput = captured.toString().trim()
+
+            // SIGKILL (137) means the process was externally killed — the kernel
+            // may already have been partially modified. Treat this differently
+            // from a clean non-zero exit so the user gets an accurate diagnosis.
+            if (exitCode == 137) {
+                throw IllegalArgumentException(
+                    app.getString(R.string.error_payload_killed, earlyOutput.takeIf(String::isNotBlank)
+                        ?.let { " ($it)" } ?: ""),
+                )
+            }
             require(exitCode == 0) {
                 app.getString(
                     R.string.error_payload_exit,
@@ -299,10 +403,14 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 app.getString(R.string.error_success_marker)
             }
         } finally {
+            // process.waitFor() has already returned above, so the process
+            // is guaranteed dead. Only call destroy() if somehow still alive
+            // (e.g., the wait loop above was interrupted before reaching waitFor).
             if (process.isAlive) {
                 process.destroy()
-                delay(500.milliseconds)
-                if (process.isAlive) process.destroyForcibly()
+                if (!process.waitFor(500, TimeUnit.MILLISECONDS)) {
+                    process.destroyForcibly()
+                }
             }
         }
         appendLog(app.getString(R.string.log_bootstrap_root))
@@ -321,7 +429,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
     private fun drainStream(stream: InputStream, buffer: StringBuilder) {
         val data = ByteArray(4096)
         while (stream.available() > 0) {
-            val count = stream.read(data)
+            val count = stream.read(data, 0, data.size)
             if (count <= 0) break
             buffer.append(String(data, 0, count, Charsets.UTF_8))
         }
@@ -359,10 +467,71 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         if (lateLoad.output.isNotBlank()) appendLog(lateLoad.output)
         storeInstallReceipt()
         appendLog(app.getString(R.string.log_ksu_control_verified))
+        verifyStability()
+    }
+
+    /**
+     * Verifies that the system remains stable after the KernelSU payload was applied.
+     * A payload can apply root correctly but still break SystemUI overlays and
+     * Google apps (e.g., by modifying display or SELinux properties). If the system
+     * is not stable, auto-run on boot is NOT enabled, and the user must manually
+     * verify the system works before re-enabling auto-run.
+     */
+    private fun verifyStability() {
+        val systemUiAlive = runCatching { isSystemUiAlive() }.getOrNull() ?: true
+        val stability = if (systemUiAlive) InstallStability.Stable else InstallStability.Unstable
+
+        mutableState.value = mutableState.value.copy(stability = stability)
+
+        if (stability == InstallStability.Unstable) {
+            appendLog("[-] System stability check failed: SystemUI not responsive")
+            appendLog("[!] Auto-run on boot is NOT enabled. Manually verify the system works before retrying.")
+        } else {
+            appendLog("[+] System stability check passed")
+        }
+    }
+
+    private fun isSystemUiAlive(): Boolean {
+        return try {
+            val activityManager = app.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+            val processCheck = activityManager?.runningAppProcesses?.any {
+                it.processName.contains("systemui", ignoreCase = true) &&
+                    it.importance >= android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE
+            } ?: false
+            if (processCheck) return true
+            // Fallback: check if SystemUI package is present and not stopped
+            val pm = app.packageManager
+            val state = pm.getApplicationInfo("com.android.systemui", 0)
+            state != null && !pm.getComponentEnabledSetting(
+                ComponentName("com.android.systemui", "com.android.systemui.SystemUI")
+            ).let { it == PackageManager.COMPONENT_ENABLED_STATE_DISABLED || it == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER }
+        } catch (_: Throwable) {
+            true
+        }
+    }
+
+    private fun isExploitRunning(): Boolean {
+        // Auto-run was triggered but the install receipt is not valid → payload is in progress
+        val triggered = AppPreferences.autoRunOnBoot(app) && AutoRunManager.isAutoRunTriggered(app)
+        val receiptValid = runCatching {
+            val bootToken = currentBootToken() ?: return false
+            val receipt = app.getSharedPreferences(INSTALL_RECEIPT, Application.MODE_PRIVATE)
+            receipt.getString(RECEIPT_BOOT_TOKEN, null) == bootToken && receipt.getBoolean(RECEIPT_VERIFIED, false)
+        }.getOrNull() ?: false
+        if (triggered && !receiptValid) return true
+        // Check if the exploit helper process is still running
+        return runCatching {
+            File("/proc").listFiles()?.any { dir ->
+                runCatching {
+                    val cmd = File(dir, "cmdline").readText(Charsets.UTF_8).trim()
+                    cmd.contains("libcve43499root") || cmd.contains("ksud-s25u-kdp") || cmd.contains("cve-2026-43499")
+                }.getOrNull() ?: false
+            } ?: false
+        }.getOrNull() ?: false
     }
 
     private fun detectInstalled(): Boolean {
-        if (NativeProbe.isKernelSuActive()) return true
+        if (NativeProbe.isAvailable() && runCatching { NativeProbe.isKernelSuActive() }.getOrNull() == true) return true
         val bootToken = currentBootToken() ?: return false
         val receipt = app.getSharedPreferences(INSTALL_RECEIPT, Application.MODE_PRIVATE)
         return receipt.getString(RECEIPT_BOOT_TOKEN, null) == bootToken &&
@@ -481,10 +650,13 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             val exitCode = process.waitFor()
             return CommandResult(exitCode, stripAnsi(captured.toString().trim()))
         } finally {
+            // process.waitFor() has already returned, so the process
+            // is guaranteed dead. Only destroy if somehow still alive.
             if (process.isAlive) {
                 process.destroy()
-                delay(500.milliseconds)
-                if (process.isAlive) process.destroyForcibly()
+                if (!process.waitFor(500, TimeUnit.MILLISECONDS)) {
+                    process.destroyForcibly()
+                }
             }
         }
     }

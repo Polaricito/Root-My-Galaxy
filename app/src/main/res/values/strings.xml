@@ -94,6 +94,10 @@
     <string name="phase_installed">KernelSU module and control channel verified</string>
     <string name="phase_failed">Review the failure point in the log below</string>
 
+    <string name="status_system_unstable">System UI check failed — root applied but SystemUI is unresponsive</string>
+    <string name="status_system_stable">System UI check passed — root applied successfully</string>
+    <string name="stability_warning_subtitle">Root may have broken SystemUI or Google apps. Disable auto-run and verify the system works before retrying.</string>
+
     <string name="status_ksu_active">KernelSU active</string>
     <string name="status_not_installed">Not installed</string>
     <string name="status_support_failed">Support check failed</string>
@@ -103,6 +107,7 @@
     <string name="status_ksu_loading">Late-loading KernelSU</string>
     <string name="status_install_failed">Installation failed</string>
     <string name="log_profile">[+] Support profile: %1$s</string>
+    <string name="log_exploit_interrupted">[-] Previous exploit attempt was interrupted by a reboot — check the failed log and retry</string>
     <string name="log_download_verified">[+] Payload download complete</string>
     <string name="log_install_complete">[+] Installation complete</string>
     <string name="log_bootstrap_root">[+] Bootstrap root acquired</string>
@@ -112,6 +117,7 @@
     <string name="error_exploit_stalled">The exploit log did not advance for 90 seconds</string>
     <string name="error_exploit_timeout">The exploit exceeded the 15-minute limit</string>
     <string name="error_payload_exit">Payload execution failed: %1$d%2$s</string>
+    <string name="error_payload_killed">Payload was killed by the system (SIGKILL). The kernel may be partially modified. Disable auto-run and retry the installation.</string>
     <string name="error_success_marker">Exploit success markers were not found</string>
     <string name="error_ksu_stage">KernelSU staging failed: %1$s</string>
     <string name="error_ksu_verify">KernelSU late-load or control verification failed (rc=%1$d): %2$s</string>
@@ -151,6 +157,26 @@
     <string name="action_save">Save</string>
     <string name="shizuku_mode">Use Shizuku</string>
     <string name="shizuku_mode_description">Use Shizuku to run the payload. This can improve reliability.</string>
+    <string name="payloads_save">Save payloads externally</string>
+    <string name="payloads_save_description">Copy downloaded payloads to shared storage so they survive factory resets.</string>
+    <string name="payloads_save_summary">Payloads saved to shared storage</string>
+    <string name="payloads_save_summary_off">Payloads not saved externally</string>
+    <string name="payloads_path">Payload storage path</string>
+    <string name="payloads_path_description">Location where persistent payloads are stored on the device</string>
+    <string name="payloads_cached">Cached payloads</string>
+    <string name="payloads_delete">Delete cached payloads</string>
+    <string name="payloads_delete_description">Remove all cached payloads from shared storage</string>
+    <string name="auto_run_on_boot">Auto-run on boot</string>
+    <string name="auto_run_on_boot_description">Automatically trigger the payload after the system finishes booting, so root is established without opening the app.</string>
+    <string name="boot_delay">Boot delay</string>
+    <string name="boot_delay_description">Seconds to wait after boot before triggering the payload. Allows system I/O to settle for a more reliable exploit.</string>
+    <string name="boot_delay_seconds">%1$d seconds</string>
+    <string name="boot_delay_custom">Custom delay</string>
+    <string name="boot_delay_range">Delay must be between %1$d and %2$d seconds</string>
+    <string name="auto_run_disabled">Auto-run on boot was disabled due to a failed attempt</string>
+    <string name="auto_run_title">Auto-run on boot</string>
+    <string name="auto_run_summary_on">Payload will run automatically after boot</string>
+    <string name="auto_run_summary_off">Payload will not run automatically</string>
     <string name="shizuku_not_running_title">Shizuku is not running</string>
     <string name="shizuku_not_running_body">Start the Shizuku service with adb or root and grant this app permission, then enable this option.</string>
     <string name="action_download_shizuku">Download Shizuku</string>

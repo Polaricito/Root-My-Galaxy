@@ -37,9 +37,15 @@ object AppPreferences {
     private const val PAYLOAD_REPOSITORY = "payload_repository"
     private const val PAYLOAD_BRANCH = "payload_branch"
     private const val CONSUMED_INSTALL_REQUEST = "consumed_install_request"
+    private const val AUTO_RUN_ON_BOOT = "auto_run_on_boot"
+    private const val BOOT_DELAY = "boot_delay_seconds"
+    private const val PAYLOADS_SAVE_ENABLED = "payloads_save_enabled"
 
     const val DEFAULT_PAYLOAD_REPOSITORY = "BuSung-dev/Root-My-Galaxy-Payloads"
     const val DEFAULT_PAYLOAD_BRANCH = "main"
+    const val DEFAULT_BOOT_DELAY = 60
+    const val MIN_BOOT_DELAY = 60
+    const val MAX_BOOT_DELAY = 120
 
     fun payloadRepository(context: Context): String =
         prefs(context).getString(PAYLOAD_REPOSITORY, DEFAULT_PAYLOAD_REPOSITORY)
@@ -96,6 +102,33 @@ object AppPreferences {
     fun setShizukuMode(context: Context, enabled: Boolean) {
         prefs(context).edit()
             .putBoolean(SHIZUKU_MODE, enabled)
+            .apply()
+    }
+
+    fun autoRunOnBoot(context: Context): Boolean =
+        prefs(context).getBoolean(AUTO_RUN_ON_BOOT, false)
+
+    fun setAutoRunOnBoot(context: Context, enabled: Boolean) {
+        prefs(context).edit()
+            .putBoolean(AUTO_RUN_ON_BOOT, enabled)
+            .apply()
+    }
+
+    fun bootDelay(context: Context): Int =
+        prefs(context).getInt(BOOT_DELAY, DEFAULT_BOOT_DELAY)
+
+    fun setBootDelay(context: Context, delaySeconds: Int) {
+        prefs(context).edit()
+            .putInt(BOOT_DELAY, delaySeconds.coerceIn(MIN_BOOT_DELAY, MAX_BOOT_DELAY))
+            .apply()
+    }
+
+    fun payloadsSaveEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(PAYLOADS_SAVE_ENABLED, false)
+
+    fun setPayloadsSaveEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit()
+            .putBoolean(PAYLOADS_SAVE_ENABLED, enabled)
             .apply()
     }
 
