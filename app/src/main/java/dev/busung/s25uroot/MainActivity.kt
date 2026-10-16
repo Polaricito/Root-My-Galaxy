@@ -233,6 +233,7 @@ class MainActivity : ComponentActivity() {
                     bootDelay = bootDelay,
                     autoRunStatus = autoRunStatus,
                     canPostNotifications = canPostNotifications,
+                    onNotificationsPermissionResult = ::onNotificationsPermissionResult,
                     onAutoRunOnBootChanged = { enabled ->
                         AppPreferences.setAutoRunOnBoot(this, enabled)
                         if (enabled) {
@@ -347,6 +348,16 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
+     * Permission results arrive on the activity, not on the composable: the
+     * settings page only receives the flag and reports back, otherwise it would
+     * try to assign to its own val parameter.
+     */
+    private fun onNotificationsPermissionResult(granted: Boolean) {
+        canPostNotifications = granted
+        refreshAutoRunState()
+    }
+
+    /**
      * Clears a pause so the loop runs again on the next boot. The toggle is
      * re-armed here because a pause always leaves it off.
      */
@@ -430,6 +441,7 @@ private fun RootApp(
     bootDelay: Int,
     autoRunStatus: AutoRunStatus,
     canPostNotifications: Boolean,
+    onNotificationsPermissionResult: (Boolean) -> Unit,
     onAccentColorChanged: (AccentColor) -> Unit,
     onThemeModeChanged: (AppThemeMode) -> Unit,
     onAdvancedModeChanged: (Boolean) -> Unit,
@@ -666,6 +678,7 @@ private fun RootApp(
                     bootDelay = bootDelay,
                     autoRunStatus = autoRunStatus,
                     canPostNotifications = canPostNotifications,
+                    onNotificationsPermissionResult = ::onNotificationsPermissionResult,
                     updateStatus = updateStatus,
                     onCheckForUpdate = checkForUpdate,
                     onStartDownload = startDownload,
@@ -1588,6 +1601,7 @@ private fun SettingsPage(
     bootDelay: Int,
     autoRunStatus: AutoRunStatus,
     canPostNotifications: Boolean,
+    onNotificationsPermissionResult: (Boolean) -> Unit,
     updateStatus: UpdateStatus,
     onCheckForUpdate: () -> Unit,
     onStartDownload: (UpdateInfo) -> Unit,
@@ -1621,7 +1635,7 @@ private fun SettingsPage(
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
-        canPostNotifications = granted
+        onNotificationsPermissionResult(granted)
         if (!granted) showNotificationDialog = false
     }
     val requestNotificationPermission: () -> Unit = {
