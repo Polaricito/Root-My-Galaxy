@@ -38,6 +38,7 @@ object AppPreferences {
     private const val PAYLOAD_BRANCH = "payload_branch"
     private const val CONSUMED_INSTALL_REQUEST = "consumed_install_request"
     private const val AUTO_RUN_ON_BOOT = "auto_run_on_boot"
+    private const val AUTO_RUN_MAX_ATTEMPTS = "auto_run_max_attempts"
     private const val BOOT_DELAY = "boot_delay_seconds"
     private const val PAYLOADS_SAVE_ENABLED = "payloads_save_enabled"
 
@@ -111,6 +112,16 @@ object AppPreferences {
     fun setAutoRunOnBoot(context: Context, enabled: Boolean) {
         prefs(context).edit()
             .putBoolean(AUTO_RUN_ON_BOOT, enabled)
+            .apply()
+    }
+
+    /** How many auto-apply attempts may run before the loop pauses itself. */
+    fun autoRunMaxAttempts(context: Context): Int =
+        prefs(context).getInt(AUTO_RUN_MAX_ATTEMPTS, AutoRunPolicy.DEFAULT_MAX_ATTEMPTS)
+
+    fun setAutoRunMaxAttempts(context: Context, attempts: Int) {
+        prefs(context).edit()
+            .putInt(AUTO_RUN_MAX_ATTEMPTS, AutoRunPolicy.clampMaxAttempts(attempts))
             .apply()
     }
 

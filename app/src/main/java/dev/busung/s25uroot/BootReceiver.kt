@@ -3,95 +3,64 @@ package dev.busung.s25uroot
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.os.SystemClock
-import android.app.AlarmManager
-import android.app.PendingIntent
 import android.util.Log
 
 /**
- * Listens for BOOT_COMPLETED and schedules the payload execution
- * after a configurable delay using AlarmManager.setExactAndAllowWhileIdle().
+ * Listens for boot broadcasts and arms the payload run.
  *
- * This avoids keeping a background thread alive (which Samsung's One UI
- * aggressively kills) by letting the system wake the app at the exact
- * scheduled time.
+ * The run itself is delivered as an alarm instead of a background thread
+ * because One UI aggressively kills long-lived background work; letting the
+ * system wake the app at the scheduled time survives process death. QUICKBOOT
+ * and REBOOT are handled alongside BOOT_COMPLETED because Samsung devices
+ * emit those instead on some fast-boot paths.
+ *
+ * Booting only marks the run as waiting. The alarm is scheduled on
+ * USER_PRESENT, because an exploit fired against a locked device is the
+ * likeliest way to leave the phone unbootable.
  */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
-        if (!AppPreferences.autoRunOnBoot(context)) return
+        when (intent.action) {
+            Intent.ACTION_BOOT_COMPLETED,
+            ACTION_QUICKBOOT_POWERON,
+            ACTION_REBOOT,
+            -> {
+                if (!AppPreferences.autoRunOnBoot(context)) return
+                AutoRunManager.markAwaitingUnlock(context)
+                AutoRunNotifier.cancel(context)
+                Log.d(TAG, "Booted, waiting for the device to be unlocked")
+            }
 
-        val delaySeconds = AppPreferences.bootDelay(context)
-        val triggerAtMillis = SystemClock.elapsedRealtime() + (delaySeconds * 1000L)
+            Intent.ACTION_USER_PRESENT -> {
+                // Consuming the flag keeps this to one run per boot instead of
+                // one per screen-on.
+                if (!AutoRunManager.consumeAwaitingUnlock(context)) return
+                if (!AppPreferences.autoRunOnBoot(context)) return
+                val delaySeconds = AppPreferences.bootDelay(context)
+                if (AutoRunScheduler.schedule(context, delaySeconds)) {
+                    Log.d(TAG, "Unlocked, scheduled auto-run payload in ${delaySeconds}s")
+                } else {
+                    Log.e(TAG, "Auto-run is armed but no alarm could be scheduled")
+                }
+            }
 
-        val scheduler = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        val pendingIntent = PendingIntent.getActivity(
-            context,
-            BOOT_REQUEST_CODE,
-            Intent(context, MainActivity::class.java).apply {
-                action = ACTION_AUTO_RUN
-                putExtra(EXTRA_BOOT_DELAY, delaySeconds)
-            },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
+            Intent.ACTION_MY_PACKAGE_REPLACED -> {
+                // An alarm queued by the previous build must not survive the
+                // update: the next boot is the moment auto-run belongs to.
+                AutoRunScheduler.cancel(context)
+                if (AppPreferences.autoRunOnBoot(context)) {
+                    Log.d(TAG, "App updated, auto-run re-armed for the next boot")
+                }
+            }
 
-        try {
-            scheduler.setExactAndAllowWhileIdle(
-                AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                triggerAtMillis,
-                pendingIntent,
-            )
-            Log.d(TAG, "Scheduled auto-run payload in ${delaySeconds}s after boot")
-        } catch (e: SecurityException) {
-            Log.e(TAG, "Failed to schedule boot alarm", e)
-        } catch (e: Exception) {
-            Log.e(TAG, "Unexpected error scheduling boot alarm", e)
+            else -> Unit
         }
     }
 
     companion object {
         const val ACTION_AUTO_RUN = "dev.busung.s25uroot.AUTO_RUN"
-        const val EXTRA_BOOT_DELAY = "boot_delay_seconds"
-        private const val BOOT_REQUEST_CODE = 42
+        private const val ACTION_QUICKBOOT_POWERON = "android.intent.action.QUICKBOOT_POWERON"
+        private const val ACTION_REBOOT = "android.intent.action.REBOOT"
         private const val TAG = "BootReceiver"
-
-        fun schedule(context: Context, delaySeconds: Int) {
-            val triggerAtMillis = SystemClock.elapsedRealtime() + (delaySeconds * 1000L)
-            val scheduler = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-            val pendingIntent = PendingIntent.getActivity(
-                context,
-                BOOT_REQUEST_CODE,
-                Intent(context, MainActivity::class.java).apply {
-                    action = ACTION_AUTO_RUN
-                    putExtra(EXTRA_BOOT_DELAY, delaySeconds)
-                },
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-            )
-            try {
-                scheduler.setExactAndAllowWhileIdle(
-                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                    triggerAtMillis,
-                    pendingIntent,
-                )
-            } catch (e: SecurityException) {
-                Log.e(TAG, "Failed to schedule boot alarm", e)
-            }
-        }
-
-        fun cancel(context: Context) {
-            val scheduler = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-            val pendingIntent = PendingIntent.getActivity(
-                context,
-                BOOT_REQUEST_CODE,
-                Intent(context, MainActivity::class.java).apply {
-                    action = ACTION_AUTO_RUN
-                },
-                PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE,
-            )
-            if (pendingIntent != null) {
-                scheduler.cancel(pendingIntent)
-                pendingIntent.cancel()
-            }
-        }
     }
 }

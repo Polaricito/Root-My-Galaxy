@@ -1,5 +1,6 @@
 package dev.busung.s25uroot
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -79,10 +80,12 @@ import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Memory
+import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.SystemUpdate
+import androidx.compose.material.icons.rounded.Replay
 import androidx.compose.material.icons.rounded.Save
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Timer
@@ -173,6 +176,10 @@ class MainActivity : ComponentActivity() {
     private var payloadBranch by mutableStateOf("")
     private var autoRunOnBoot by mutableStateOf(false)
     private var bootDelay by mutableStateOf(0)
+    // Read in onCreate: a field initializer would run before the activity has
+    // a base context, so the default stays empty until then.
+    private var autoRunStatus by mutableStateOf(AutoRunStatus())
+    private var canPostNotifications by mutableStateOf(true)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -186,6 +193,7 @@ class MainActivity : ComponentActivity() {
         payloadBranch = AppPreferences.payloadBranch(this)
         autoRunOnBoot = AppPreferences.autoRunOnBoot(this)
         bootDelay = AppPreferences.bootDelay(this)
+        refreshAutoRunState()
         handleAutoRunIntent(intent)
         setContent {
             RootMyGalaxyTheme(accentColor = accentColor, themeMode = themeMode) {
@@ -223,22 +231,35 @@ class MainActivity : ComponentActivity() {
                     },
                     autoRunOnBoot = autoRunOnBoot,
                     bootDelay = bootDelay,
+                    autoRunStatus = autoRunStatus,
+                    canPostNotifications = canPostNotifications,
                     onAutoRunOnBootChanged = { enabled ->
                         AppPreferences.setAutoRunOnBoot(this, enabled)
-                        autoRunOnBoot = enabled
                         if (enabled) {
-                            BootReceiver.schedule(this, bootDelay)
+                            // Arming the toggle is an explicit re-arm, so it
+                            // clears any pause and the retry budget with it.
+                            AutoRunManager.onAutoRunEnabled(this)
+                            AutoRunScheduler.schedule(this, bootDelay)
                         } else {
-                            BootReceiver.cancel(this)
+                            AutoRunManager.onAutoRunDisabled(this)
+                            AutoRunScheduler.cancel(this)
                         }
+                        refreshAutoRunState()
                     },
                     onBootDelayChanged = { delay ->
                         AppPreferences.setBootDelay(this, delay)
                         bootDelay = delay
                         if (autoRunOnBoot) {
-                            BootReceiver.schedule(this, delay)
+                            AutoRunScheduler.schedule(this, delay)
                         }
+                        refreshAutoRunState()
                     },
+                    onAutoRunMaxAttemptsChanged = { attempts ->
+                        AppPreferences.setAutoRunMaxAttempts(this, attempts)
+                        refreshAutoRunState()
+                    },
+                    onAutoRunRunNow = ::runAutoApplyNow,
+                    onAutoRunReset = ::rearmAutoRun,
                     openInstaller = { profileId ->
                         val installer = Intent(this, InstallActivity::class.java)
                             .putExtra(InstallActivity.EXTRA_INSTALL_REQUEST_ID, UUID.randomUUID().toString())
@@ -254,25 +275,87 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        refreshAutoRunState()
         if (resumedOnce) installViewModel.refresh() else resumedOnce = true
     }
 
+    /**
+     * The boot alarm targets this activity, so a launcher that is already
+     * running receives the auto-run intent here instead of through onCreate.
+     * Without this the payload silently never runs when the app was open.
+     */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleAutoRunIntent(intent)
+    }
+
+    private fun refreshAutoRunState() {
+        autoRunOnBoot = AppPreferences.autoRunOnBoot(this)
+        autoRunStatus = AutoRunManager.status(this)
+        canPostNotifications = AutoRunNotifier.canPost(this)
+    }
+
+    /**
+     * Runs a boot attempt that the user has brought into the foreground, either
+     * by tapping the auto-run notification or by an alarm landing while the app
+     * was already open. The retry budget, the boot_id failsafe and the pause
+     * state all live in [AutoRunManager]; this only translates its decision
+     * into "launch the installer" or "stay quiet".
+     */
     private fun handleAutoRunIntent(intent: Intent) {
-        if (intent.action == BootReceiver.ACTION_AUTO_RUN && autoRunOnBoot) {
-            // CRITICAL FIX: Disable auto-run BEFORE the exploit runs
-            // This prevents bootloop if the exploit triggers a reboot
-            AppPreferences.setAutoRunOnBoot(this, false)
-            BootReceiver.cancel(this)
-            // Save boot_id for failsafe check after exploit
-            AutoRunManager.saveBootIdBeforeExploit(this)
-            AutoRunManager.incrementAttemptCounter(this)
-            AutoRunManager.setAutoRunTriggered(this, true)
-            val requestId = UUID.randomUUID().toString()
-            val installer = Intent(this, InstallActivity::class.java)
-                .putExtra(InstallActivity.EXTRA_INSTALL_REQUEST_ID, requestId)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            startActivity(installer)
+        if (intent.action != BootReceiver.ACTION_AUTO_RUN) return
+        // Consume the action so a configuration change cannot replay the run.
+        intent.action = null
+        if (!AppPreferences.autoRunOnBoot(this)) {
+            AutoRunScheduler.cancel(this)
+            refreshAutoRunState()
+            return
         }
+        // The fired alarm is consumed; drop it so only one installer is queued.
+        AutoRunScheduler.cancel(this)
+        val attempt = AutoRunManager.beginAttempt(this)
+        // The user answered the prompt, so the notification has done its job.
+        AutoRunNotifier.cancel(this)
+        refreshAutoRunState()
+        when (attempt.action) {
+            AutoRunAction.Proceed -> startActivity(
+                Intent(this, InstallActivity::class.java)
+                    .putExtra(InstallActivity.EXTRA_INSTALL_REQUEST_ID, UUID.randomUUID().toString())
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+
+            AutoRunAction.Suspend -> Toast.makeText(
+                this,
+                getString(R.string.auto_run_suspended_toast),
+                Toast.LENGTH_LONG,
+            ).show()
+
+            AutoRunAction.Retry -> Unit
+        }
+    }
+
+    /** Fires the boot attempt right away instead of waiting for the next boot. */
+    private fun runAutoApplyNow() {
+        AppPreferences.setAutoRunOnBoot(this, true)
+        AutoRunManager.onAutoRunEnabled(this)
+        // Straight to the attempt: the user is already in the app, so there is
+        // no reason to make them wait for the alarm.
+        handleAutoRunIntent(
+            Intent(this, MainActivity::class.java).setAction(BootReceiver.ACTION_AUTO_RUN),
+        )
+    }
+
+    /**
+     * Clears a pause so the loop runs again on the next boot. The toggle is
+     * re-armed here because a pause always leaves it off.
+     */
+    private fun rearmAutoRun() {
+        AppPreferences.setAutoRunOnBoot(this, true)
+        AutoRunManager.onAutoRunEnabled(this)
+        AutoRunScheduler.cancel(this)
+        refreshAutoRunState()
+        Toast.makeText(this, R.string.auto_run_rearmed_toast, Toast.LENGTH_SHORT).show()
     }
 }
 
@@ -345,6 +428,8 @@ private fun RootApp(
     payloadBranch: String,
     autoRunOnBoot: Boolean,
     bootDelay: Int,
+    autoRunStatus: AutoRunStatus,
+    canPostNotifications: Boolean,
     onAccentColorChanged: (AccentColor) -> Unit,
     onThemeModeChanged: (AppThemeMode) -> Unit,
     onAdvancedModeChanged: (Boolean) -> Unit,
@@ -353,6 +438,9 @@ private fun RootApp(
     onPayloadBranchChanged: (String) -> Unit,
     onAutoRunOnBootChanged: (Boolean) -> Unit,
     onBootDelayChanged: (Int) -> Unit,
+    onAutoRunMaxAttemptsChanged: (Int) -> Unit,
+    onAutoRunRunNow: () -> Unit,
+    onAutoRunReset: () -> Unit,
     openInstaller: (String?) -> Unit,
 ) {
     val installState by installViewModel.state.collectAsStateWithLifecycle()
@@ -576,6 +664,8 @@ private fun RootApp(
                     payloadBranch = payloadBranch,
                     autoRunOnBoot = autoRunOnBoot,
                     bootDelay = bootDelay,
+                    autoRunStatus = autoRunStatus,
+                    canPostNotifications = canPostNotifications,
                     updateStatus = updateStatus,
                     onCheckForUpdate = checkForUpdate,
                     onStartDownload = startDownload,
@@ -587,6 +677,9 @@ private fun RootApp(
                     onPayloadBranchChanged = onPayloadBranchChanged,
                     onAutoRunOnBootChanged = onAutoRunOnBootChanged,
                     onBootDelayChanged = onBootDelayChanged,
+                    onAutoRunMaxAttemptsChanged = onAutoRunMaxAttemptsChanged,
+                    onAutoRunRunNow = onAutoRunRunNow,
+                    onAutoRunReset = onAutoRunReset,
                 )
             }
         }
@@ -1491,6 +1584,10 @@ private fun SettingsPage(
     shizukuMode: Boolean,
     payloadRepository: String,
     payloadBranch: String,
+    autoRunOnBoot: Boolean,
+    bootDelay: Int,
+    autoRunStatus: AutoRunStatus,
+    canPostNotifications: Boolean,
     updateStatus: UpdateStatus,
     onCheckForUpdate: () -> Unit,
     onStartDownload: (UpdateInfo) -> Unit,
@@ -1500,10 +1597,11 @@ private fun SettingsPage(
     onShizukuModeChanged: (Boolean) -> Unit,
     onPayloadRepositoryChanged: (String) -> Unit,
     onPayloadBranchChanged: (String) -> Unit,
-    autoRunOnBoot: Boolean,
-    bootDelay: Int,
     onAutoRunOnBootChanged: (Boolean) -> Unit,
     onBootDelayChanged: (Int) -> Unit,
+    onAutoRunMaxAttemptsChanged: (Int) -> Unit,
+    onAutoRunRunNow: () -> Unit,
+    onAutoRunReset: () -> Unit,
 ) {
     val context = LocalContext.current
     val view = LocalView.current
@@ -1514,6 +1612,22 @@ private fun SettingsPage(
     var showShizukuMissingDialog by remember { mutableStateOf(false) }
     var showPayloadRepositoryDialog by remember { mutableStateOf(false) }
     var showBootDelayDialog by remember { mutableStateOf(false) }
+    var showAutoRunRetryDialog by remember { mutableStateOf(false) }
+    var showNotificationDialog by remember { mutableStateOf(false) }
+    // The boot delay dialog is reachable from the toggle (which must arm
+    // auto-run on confirm) and from the delay card (which must only store the
+    // delay).
+    var bootDelayEnablesAutoRun by remember { mutableStateOf(false) }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        canPostNotifications = granted
+        if (!granted) showNotificationDialog = false
+    }
+    val requestNotificationPermission: () -> Unit = {
+        showNotificationDialog = false
+        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
     var languageMenuTop by remember { mutableStateOf(32.dp) }
     var colorMenuTop by remember { mutableStateOf(32.dp) }
     val density = LocalDensity.current
@@ -1574,14 +1688,27 @@ private fun SettingsPage(
                 bootDelayValue = delay
                 showBootDelayDialog = false
                 onBootDelayChanged(delay)
-                if (autoRunOnBoot) {
-                    BootReceiver.schedule(context, delay)
-                } else {
-                    // Enabling auto-run from dialog
-                    onAutoRunOnBootChanged(true)
-                    BootReceiver.schedule(context, delay)
-                }
+                if (bootDelayEnablesAutoRun) onAutoRunOnBootChanged(true)
             },
+        )
+    }
+
+    if (showAutoRunRetryDialog) {
+        AutoRunRetryDialog(
+            maxAttempts = autoRunStatus.maxAttempts,
+            baseDelaySeconds = bootDelayValue,
+            onDismiss = { showAutoRunRetryDialog = false },
+            onConfirm = { attempts ->
+                showAutoRunRetryDialog = false
+                onAutoRunMaxAttemptsChanged(attempts)
+            },
+        )
+    }
+
+    if (showNotificationDialog) {
+        NotificationPermissionDialog(
+            onDismiss = { showNotificationDialog = false },
+            onGrant = requestNotificationPermission,
         )
     }
 
@@ -1709,20 +1836,18 @@ private fun SettingsPage(
                 SettingsSwitchCard(
                     icon = Icons.Rounded.Schedule,
                     title = stringResource(R.string.auto_run_on_boot),
-                    description = if (autoRunOnBoot) {
-                        stringResource(R.string.auto_run_summary_on)
-                    } else {
-                        stringResource(R.string.auto_run_summary_off)
-                    },
+                    description = autoRunSwitchSummary(autoRunStatus),
                     checked = autoRunOnBoot,
                     position = SettingsCardPosition.Middle,
                     onCheckedChange = {
                         clickHaptic(view)
                         if (it) {
                             // Show the boot delay dialog before enabling
+                            bootDelayEnablesAutoRun = true
                             showBootDelayDialog = true
                         } else {
-                            BootReceiver.cancel(context)
+                            AutoRunScheduler.cancel(context)
+                            AutoRunNotifier.cancel(context)
                             onAutoRunOnBootChanged(false)
                         }
                     },
@@ -1735,9 +1860,46 @@ private fun SettingsPage(
                     position = SettingsCardPosition.Middle,
                     onClick = {
                         clickHaptic(view)
+                        bootDelayEnablesAutoRun = false
                         showBootDelayDialog = true
                     },
                 )
+                AutoRunStatusCard(
+                    status = autoRunStatus,
+                    position = SettingsCardPosition.Middle,
+                    onRunNow = onAutoRunRunNow,
+                    onReset = onAutoRunReset,
+                )
+                SettingsCard(
+                    icon = Icons.Rounded.Replay,
+                    title = stringResource(R.string.auto_run_retry),
+                    description = stringResource(R.string.auto_run_retry_description),
+                    valueBelow = stringResource(
+                        R.string.auto_run_retry_summary,
+                        autoRunStatus.maxAttempts,
+                        formatDelayLabel(
+                            AutoRunPolicy.retryDelaySeconds(bootDelay, 2),
+                        ),
+                    ),
+                    position = SettingsCardPosition.Middle,
+                    onClick = {
+                        clickHaptic(view)
+                        showAutoRunRetryDialog = true
+                    },
+                )
+                if (!canPostNotifications) {
+                    SettingsCard(
+                        icon = Icons.Rounded.Notifications,
+                        title = stringResource(R.string.auto_run_notifications),
+                        description = stringResource(R.string.auto_run_notifications_description),
+                        value = stringResource(R.string.action_allow),
+                        position = SettingsCardPosition.Middle,
+                        onClick = {
+                            clickHaptic(view)
+                            showNotificationDialog = true
+                        },
+                    )
+                }
                 SettingsSwitchCard(
                     icon = Icons.Rounded.Save,
                     title = stringResource(R.string.payloads_save),
@@ -2135,7 +2297,7 @@ private fun PayloadRepositoryDialog(
 }
 
 @Composable
-private fun SectionLabel(text: String) {
+internal fun SectionLabel(text: String) {
     Text(
         text = text,
         style = MaterialTheme.typography.labelLarge,
@@ -2144,7 +2306,7 @@ private fun SectionLabel(text: String) {
     )
 }
 
-private enum class SettingsCardPosition {
+internal enum class SettingsCardPosition {
     Single,
     GroupedSingle,
     Top,
@@ -2153,7 +2315,7 @@ private enum class SettingsCardPosition {
 }
 
 @Composable
-private fun SettingsCard(
+internal fun SettingsCard(
     modifier: Modifier = Modifier,
     icon: ImageVector,
     title: String,
@@ -2218,7 +2380,7 @@ private fun SettingsCard(
 }
 
 @Composable
-private fun SettingsSwitchCard(
+internal fun SettingsSwitchCard(
     icon: ImageVector,
     title: String,
     description: String,
@@ -2391,7 +2553,7 @@ private fun AboutDialog(onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun expressiveClickableCardShape(
+internal fun expressiveClickableCardShape(
     interactionSource: MutableInteractionSource,
     position: SettingsCardPosition = SettingsCardPosition.Single,
 ): RoundedCornerShape {
