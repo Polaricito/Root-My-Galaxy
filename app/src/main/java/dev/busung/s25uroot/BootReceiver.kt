@@ -14,9 +14,11 @@ import android.util.Log
  * and REBOOT are handled alongside BOOT_COMPLETED because Samsung devices
  * emit those instead on some fast-boot paths.
  *
- * Booting only marks the run as waiting. The alarm is scheduled on
- * USER_PRESENT, because an exploit fired against a locked device is the
- * likeliest way to leave the phone unbootable.
+ * Boot arms the alarm straight away rather than waiting for USER_PRESENT. On
+ * this device the system took 68 seconds to deliver BOOT_COMPLETED, by which
+ * time USER_PRESENT had already fired and been dropped, so the run waited
+ * forever for an event that never repeated. The unlock check now lives in
+ * [AutoRunAlarmReceiver], which re-arms itself while the phone is locked.
  */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -26,19 +28,10 @@ class BootReceiver : BroadcastReceiver() {
             ACTION_REBOOT,
             -> {
                 if (!AppPreferences.autoRunOnBoot(context)) return
-                AutoRunManager.markAwaitingUnlock(context)
                 AutoRunNotifier.cancel(context)
-                Log.d(TAG, "Booted, waiting for the device to be unlocked")
-            }
-
-            Intent.ACTION_USER_PRESENT -> {
-                // Consuming the flag keeps this to one run per boot instead of
-                // one per screen-on.
-                if (!AutoRunManager.consumeAwaitingUnlock(context)) return
-                if (!AppPreferences.autoRunOnBoot(context)) return
                 val delaySeconds = AppPreferences.bootDelay(context)
                 if (AutoRunScheduler.schedule(context, delaySeconds)) {
-                    Log.d(TAG, "Unlocked, scheduled auto-run payload in ${delaySeconds}s")
+                    Log.d(TAG, "Booted, auto-run armed in ${delaySeconds}s")
                 } else {
                     Log.e(TAG, "Auto-run is armed but no alarm could be scheduled")
                 }

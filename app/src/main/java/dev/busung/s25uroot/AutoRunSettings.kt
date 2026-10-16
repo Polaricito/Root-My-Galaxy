@@ -113,8 +113,8 @@ internal fun autoRunStatusLine(status: AutoRunStatus): String {
     autoRunPauseSummary(status)?.let { return it }
     if (status.inProgress) return stringResource(R.string.auto_run_summary_running)
     if (!status.enabled) return stringResource(R.string.auto_run_summary_off)
-    // Booted but still locked: nothing is scheduled yet, and saying so stops
-    // an armed toggle from looking broken while the user has not picked up.
+    // The alarm fired but the phone is still locked. It re-arms itself, so the
+    // run is genuinely pending rather than lost.
     if (status.awaitingUnlock) return stringResource(R.string.auto_run_awaiting_unlock)
     val nextRun = autoRunNextRunWallClock(status) ?: return stringResource(R.string.auto_run_awaits_boot)
     // getLocales() can be empty on some OEM configurations, and locales[0]

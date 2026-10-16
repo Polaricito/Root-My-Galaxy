@@ -66,11 +66,11 @@
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
                 <action android:name="android.intent.action.REBOOT" />
             </intent-filter>
-            <!-- USER_PRESENT is what actually arms the run: an exploit fired
-                 against a locked device is the likeliest way to hard-brick. -->
-            <intent-filter>
-                <action android:name="android.intent.action.USER_PRESENT" />
-            </intent-filter>
+            <!-- USER_PRESENT is deliberately not used. On the test device One UI
+                 delivered BOOT_COMPLETED 68s late, by which time USER_PRESENT had
+                 already fired and been dropped, and this build discards implicit
+                 broadcasts aimed at manifest receivers. AutoRunAlarmReceiver checks
+                 the keyguard itself and re-arms while the device stays locked. -->
             <intent-filter>
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>

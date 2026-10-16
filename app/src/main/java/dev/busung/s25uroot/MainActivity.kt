@@ -242,6 +242,7 @@ class MainActivity : ComponentActivity() {
                             // Arming the toggle is an explicit re-arm, so it
                             // clears any pause and the retry budget with it.
                             AutoRunManager.onAutoRunEnabled(this)
+                            AutoRunManager.clearAwaitingUnlock(this)
                             AutoRunScheduler.schedule(this, bootDelay)
                         } else {
                             AutoRunManager.onAutoRunDisabled(this)

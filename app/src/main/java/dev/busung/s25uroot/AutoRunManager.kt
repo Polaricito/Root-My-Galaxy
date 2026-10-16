@@ -262,7 +262,6 @@ object AutoRunManager {
         prefs(context).edit()
             .putLong(NEXT_TRIGGER_KEY, triggerElapsedMillis)
             .putBoolean(NEXT_TRIGGER_EXACT_KEY, exact)
-            .putBoolean(AWAITING_UNLOCK_KEY, false)
             .apply()
     }
 
@@ -274,23 +273,16 @@ object AutoRunManager {
     }
 
     /**
-     * The device booted but is still locked. Running the exploit against a
-     * locked device is the likeliest way to leave the phone unbootable, so the
-     * run waits for [AutoRunAlarmReceiver] to hear the next unlock.
+     * The alarm fired but the phone is still locked, so the run is still
+     * pending. Only informational: [AutoRunAlarmReceiver] re-arms the alarm,
+     * so there is nothing to consume and no state to clear on unlock.
      */
     fun markAwaitingUnlock(context: Context) {
-        prefs(context).edit()
-            .putBoolean(AWAITING_UNLOCK_KEY, true)
-            .remove(NEXT_TRIGGER_KEY)
-            .apply()
+        prefs(context).edit().putBoolean(AWAITING_UNLOCK_KEY, true).apply()
     }
 
-    /** Consumes the pending unlock, so a later screen-on does not fire twice. */
-    fun consumeAwaitingUnlock(context: Context): Boolean {
-        val preferences = prefs(context)
-        if (!preferences.getBoolean(AWAITING_UNLOCK_KEY, false)) return false
-        preferences.edit().putBoolean(AWAITING_UNLOCK_KEY, false).apply()
-        return true
+    fun clearAwaitingUnlock(context: Context) {
+        prefs(context).edit().putBoolean(AWAITING_UNLOCK_KEY, false).apply()
     }
 
     /** Wall-clock time of the pending alarm, for display purposes only. */

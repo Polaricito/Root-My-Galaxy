@@ -182,7 +182,7 @@
     <string name="auto_run_next_run_at">Next run at %1$s</string>
     <string name="auto_run_next_run_at_inexact">Next run at %1$s (may drift)</string>
     <string name="auto_run_awaits_boot">Armed, waiting for the next boot</string>
-    <string name="auto_run_awaiting_unlock">Booted, waiting for you to unlock the device</string>
+    <string name="auto_run_awaiting_unlock">Waiting for you to unlock the device</string>
     <string name="auto_run_suspended_attempts">Paused after %1$d attempts</string>
     <string name="auto_run_suspended_bootloop">Paused: the device rebooted during the exploit</string>
     <string name="auto_run_suspended">Auto-run paused. Open settings to re-arm it.</string>

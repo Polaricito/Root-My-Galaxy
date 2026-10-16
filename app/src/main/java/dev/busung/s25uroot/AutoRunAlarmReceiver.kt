@@ -15,9 +15,13 @@ import android.util.Log
  * with the app in the foreground, so the run is announced instead of forced,
  * and the notification hands control to the activity.
  *
- * When the device is already unlocked the run is started directly as well,
- * since that is the one case where the background launch is both expected and
- * likely to succeed.
+ * The unlock decision lives here rather than in a broadcast receiver. One UI
+ * can take over a minute to deliver BOOT_COMPLETED, by which time
+ * USER_PRESENT has already fired and been discarded, and this build drops
+ * implicit broadcasts aimed at manifest receivers anyway. Re-arming from the
+ * alarm itself makes the wait self-healing: if the phone is still locked the
+ * run simply waits for the next tick instead of depending on an event that
+ * may never arrive again.
  */
 class AutoRunAlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -30,6 +34,17 @@ class AutoRunAlarmReceiver : BroadcastReceiver() {
             return
         }
 
+        val delaySeconds = AppPreferences.bootDelay(context)
+        if (isDeviceLocked(context)) {
+            // Still locked: keep waiting without spending an attempt, and
+            // re-arm so the prompt appears as soon as the phone is used.
+            AutoRunManager.markAwaitingUnlock(context)
+            AutoRunScheduler.schedule(context, delaySeconds)
+            Log.d(TAG, "Still locked, auto-run re-armed in ${delaySeconds}s")
+            return
+        }
+
+        AutoRunManager.clearAwaitingUnlock(context)
         val attempt = status.attempts + 1
         val posted = AutoRunNotifier.notifyRunReady(context, attempt, status.maxAttempts)
         Log.d(
@@ -39,20 +54,18 @@ class AutoRunAlarmReceiver : BroadcastReceiver() {
                 "channelEnabled=${AutoRunNotifier.isChannelEnabled(context)}",
         )
 
-        // The notification is the reliable path. When the device is unlocked the
-        // run can also start directly, but that launch is refused from the
-        // background on Android 10+, so it must not be the only way in.
-        if (posted) return
-        if (isDeviceUnlocked(context)) {
+        // The notification is the reliable path. When it fails, a direct
+        // launch may still get through if the phone is in the user's hands.
+        if (!posted) {
             AutoRunScheduler.openInstaller(context)
         }
     }
 
-    private fun isDeviceUnlocked(context: Context): Boolean {
+    private fun isDeviceLocked(context: Context): Boolean {
         val keyguard = context.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
-        // A device without a secure keyguard reports locked=false, which is
+        // A device without a keyguard service reports locked=false, which is
         // exactly the case where running straight away is safe.
-        return keyguard?.isDeviceLocked == false
+        return keyguard?.isDeviceLocked != false
     }
 
     companion object {
