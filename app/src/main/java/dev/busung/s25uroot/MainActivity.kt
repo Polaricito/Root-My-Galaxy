@@ -233,7 +233,9 @@ class MainActivity : ComponentActivity() {
                     bootDelay = bootDelay,
                     autoRunStatus = autoRunStatus,
                     canPostNotifications = canPostNotifications,
-                    onNotificationsPermissionResult = ::onNotificationsPermissionResult,
+                    onNotificationsPermissionResult = { granted ->
+                        onNotificationsPermissionResult(granted)
+                    },
                     onAutoRunOnBootChanged = { enabled ->
                         AppPreferences.setAutoRunOnBoot(this, enabled)
                         if (enabled) {
@@ -678,7 +680,9 @@ private fun RootApp(
                     bootDelay = bootDelay,
                     autoRunStatus = autoRunStatus,
                     canPostNotifications = canPostNotifications,
-                    onNotificationsPermissionResult = ::onNotificationsPermissionResult,
+                    onNotificationsPermissionResult = { granted ->
+                        onNotificationsPermissionResult(granted)
+                    },
                     updateStatus = updateStatus,
                     onCheckForUpdate = checkForUpdate,
                     onStartDownload = startDownload,
