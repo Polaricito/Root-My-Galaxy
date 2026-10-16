@@ -1895,8 +1895,9 @@ private fun SettingsPage(
                     valueBelow = stringResource(
                         R.string.auto_run_retry_summary,
                         autoRunStatus.maxAttempts,
+                        formatDelayLabel(AutoRunPolicy.retryDelaySeconds(bootDelay, 1)),
                         formatDelayLabel(
-                            AutoRunPolicy.retryDelaySeconds(bootDelay, 2),
+                            AutoRunPolicy.retryDelaySeconds(bootDelay, autoRunStatus.maxAttempts),
                         ),
                     ),
                     position = SettingsCardPosition.Middle,

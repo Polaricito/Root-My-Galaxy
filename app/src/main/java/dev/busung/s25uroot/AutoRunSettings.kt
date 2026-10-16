@@ -117,9 +117,10 @@ internal fun autoRunStatusLine(status: AutoRunStatus): String {
     // an armed toggle from looking broken while the user has not picked up.
     if (status.awaitingUnlock) return stringResource(R.string.auto_run_awaiting_unlock)
     val nextRun = autoRunNextRunWallClock(status) ?: return stringResource(R.string.auto_run_awaits_boot)
-    val time = DateFormat
-        .getTimeInstance(DateFormat.SHORT, LocalConfiguration.current.locales[0])
-        .format(Date(nextRun))
+    // getLocales() can be empty on some OEM configurations, and locales[0]
+    // would throw while merely rendering the status card.
+    val locale = LocalConfiguration.current.locales.takeIf { !it.isEmpty }?.get(0)
+    val time = DateFormat.getTimeInstance(DateFormat.SHORT, locale).format(Date(nextRun))
     // An inexact alarm is still armed, but One UI decides when it fires.
     return if (status.nextTriggerExact) {
         stringResource(R.string.auto_run_next_run_at, time)
