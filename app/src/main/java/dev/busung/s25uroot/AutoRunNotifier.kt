@@ -8,6 +8,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.util.Log
 import androidx.core.content.ContextCompat
 
 /**
@@ -23,31 +24,54 @@ object AutoRunNotifier {
     private const val CHANNEL_ID = "auto_run"
     private const val NOTIFICATION_ID = 4101
     private const val REQUEST_CODE = 43
+    private const val TAG = "AutoRunNotifier"
 
     fun canPost(context: Context): Boolean =
         ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
             PackageManager.PERMISSION_GRANTED
 
     /**
-     * Posts the "your payload is ready" prompt. Returns false when the
-     * permission was refused, which is the signal for settings to offer it.
+     * Posts the "your payload is ready" prompt.
+     *
+     * Every failure path returns false instead of throwing, because this runs
+     * inside a BroadcastReceiver where a crash is invisible: the run would
+     * silently never appear. The return value is what settings and the log
+     * report back to the user.
      */
     fun notifyRunReady(context: Context, attempt: Int, maxAttempts: Int): Boolean {
-        if (!canPost(context)) return false
-        val manager = context.getSystemService(NotificationManager::class.java) ?: return false
+        if (!canPost(context)) {
+            Log.w(TAG, "POST_NOTIFICATIONS not granted, skipping the auto-run prompt")
+            return false
+        }
+        val manager = context.getSystemService(NotificationManager::class.java) ?: run {
+            Log.w(TAG, "NotificationManager unavailable")
+            return false
+        }
         ensureChannel(context, manager)
-        val notification = Notification.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_download_done)
-            .setContentTitle(context.getString(R.string.auto_run_notify_title))
-            .setContentText(context.getString(R.string.auto_run_notify_text, attempt, maxAttempts))
-            .setContentIntent(contentIntent(context))
-            .setAutoCancel(true)
-            .setCategory(Notification.CATEGORY_EVENT)
-            .setPriority(Notification.PRIORITY_HIGH)
-            .setVisibility(Notification.VISIBILITY_PRIVATE)
-            .build()
-        manager.notify(NOTIFICATION_ID, notification)
-        return true
+        return try {
+            val notification = Notification.Builder(context, CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_stat_auto_run)
+                .setContentTitle(context.getString(R.string.auto_run_notify_title))
+                .setContentText(context.getString(R.string.auto_run_notify_text, attempt, maxAttempts))
+                .setContentIntent(contentIntent(context))
+                .setAutoCancel(true)
+                .setCategory(Notification.CATEGORY_EVENT)
+                .setPriority(Notification.PRIORITY_HIGH)
+                .setVisibility(Notification.VISIBILITY_PRIVATE)
+                .build()
+            manager.notify(NOTIFICATION_ID, notification)
+            true
+        } catch (error: Throwable) {
+            Log.e(TAG, "Unable to post the auto-run notification", error)
+            false
+        }
+    }
+
+    /** Whether the channel still allows a visible prompt, for the status card. */
+    fun isChannelEnabled(context: Context): Boolean {
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return false
+        val channel = manager.getNotificationChannel(CHANNEL_ID) ?: return true
+        return channel.importance != NotificationManager.IMPORTANCE_NONE
     }
 
     fun cancel(context: Context) {

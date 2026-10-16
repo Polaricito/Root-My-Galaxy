@@ -32,10 +32,17 @@ class AutoRunAlarmReceiver : BroadcastReceiver() {
 
         val attempt = status.attempts + 1
         val posted = AutoRunNotifier.notifyRunReady(context, attempt, status.maxAttempts)
-        Log.d(TAG, "Auto-run due (attempt $attempt/${status.maxAttempts}), notified=$posted")
+        Log.d(
+            TAG,
+            "Auto-run due (attempt $attempt/${status.maxAttempts}), " +
+                "notified=$posted canPost=${AutoRunNotifier.canPost(context)} " +
+                "channelEnabled=${AutoRunNotifier.isChannelEnabled(context)}",
+        )
 
-        // Best effort: if the phone is in the user's hands the run can start
-        // now, otherwise the notification is the way in.
+        // The notification is the reliable path. When the device is unlocked the
+        // run can also start directly, but that launch is refused from the
+        // background on Android 10+, so it must not be the only way in.
+        if (posted) return
         if (isDeviceUnlocked(context)) {
             AutoRunScheduler.openInstaller(context)
         }

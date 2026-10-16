@@ -201,6 +201,10 @@
     <string name="auto_run_notify_title">Root My Galaxy is ready</string>
     <string name="auto_run_notify_text">Open the app to apply the payload (attempt %1$d of %2$d).</string>
     <string name="auto_run_notify_permission_body">Auto-run arms itself after boot, but the exploit needs this app open to apply. Allow notifications so you get a prompt when it is your turn.</string>
+    <string name="auto_run_notifications_ready_description">Tap to send a test prompt, so you can confirm auto-run is able to reach you.</string>
+    <string name="auto_run_notify_test">Test</string>
+    <string name="auto_run_notify_test_ok">Test prompt sent. Check your notification shade.</string>
+    <string name="auto_run_notify_test_failed">Could not post the prompt. Check notifications for this app in Android settings.</string>
     <string name="auto_run_channel_name">Auto-apply runs</string>
     <string name="auto_run_channel_description">Prompts to open the app when an automatic payload run is ready.</string>
     <string name="action_allow">Allow</string>

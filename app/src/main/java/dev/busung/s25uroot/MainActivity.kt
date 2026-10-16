@@ -1646,6 +1646,19 @@ private fun SettingsPage(
         showNotificationDialog = false
         notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
+    // Lets the user confirm the prompt works without waiting for a reboot, so
+    // a broken notification is diagnosable instead of silent.
+    val sendTestNotification: () -> Unit = {
+        val attempt = autoRunStatus.attempts + 1
+        val posted = AutoRunNotifier.notifyRunReady(context, attempt, autoRunStatus.maxAttempts)
+        Toast.makeText(
+            context,
+            context.getString(
+                if (posted) R.string.auto_run_notify_test_ok else R.string.auto_run_notify_test_failed,
+            ),
+            Toast.LENGTH_LONG,
+        ).show()
+    }
     var languageMenuTop by remember { mutableStateOf(32.dp) }
     var colorMenuTop by remember { mutableStateOf(32.dp) }
     val density = LocalDensity.current
@@ -1916,6 +1929,22 @@ private fun SettingsPage(
                         onClick = {
                             clickHaptic(view)
                             showNotificationDialog = true
+                        },
+                    )
+                } else {
+                    // Granted, but still worth proving the channel is not muted
+                    // at the OS level: a blocked channel fails silently too.
+                    SettingsCard(
+                        icon = Icons.Rounded.Notifications,
+                        title = stringResource(R.string.auto_run_notifications),
+                        description = stringResource(
+                            R.string.auto_run_notifications_ready_description,
+                        ),
+                        value = stringResource(R.string.auto_run_notify_test),
+                        position = SettingsCardPosition.Middle,
+                        onClick = {
+                            clickHaptic(view)
+                            sendTestNotification()
                         },
                     )
                 }
