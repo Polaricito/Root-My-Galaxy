@@ -40,16 +40,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Build debug APK
-        run: |
-          set -o pipefail
-          if ./gradlew assembleDebug --no-daemon 2>&1 | tee build.log; then
-            exit 0
-          fi
-          echo "::group::compiler diagnostics"
-          grep -E '^e: ' build.log | head -30 | sed 's/^/::error::/' || true
-          grep -iE 'what went wrong|^\s*> |error:' build.log | head -15 | sed 's/^/::error::/' || true
-          echo "::endgroup::"
-          exit 1
+        run: ./gradlew assembleDebug --no-daemon
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
