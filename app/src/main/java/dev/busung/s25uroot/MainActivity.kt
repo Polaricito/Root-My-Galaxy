@@ -85,7 +85,6 @@ import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.SystemUpdate
-import androidx.compose.material.icons.rounded.Replay
 import androidx.compose.material.icons.rounded.Save
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Timer
@@ -1632,7 +1631,6 @@ private fun SettingsPage(
     var showPayloadRepositoryDialog by remember { mutableStateOf(false) }
     var showBootDelayDialog by remember { mutableStateOf(false) }
     var showAutoRunRetryDialog by remember { mutableStateOf(false) }
-    var showNotificationDialog by remember { mutableStateOf(false) }
     // The boot delay dialog is reachable from the toggle (which must arm
     // auto-run on confirm) and from the delay card (which must only store the
     // delay).
@@ -1641,10 +1639,8 @@ private fun SettingsPage(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
         onNotificationsPermissionResult(granted)
-        if (!granted) showNotificationDialog = false
     }
     val requestNotificationPermission: () -> Unit = {
-        showNotificationDialog = false
         notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
     // Lets the user confirm the prompt works without waiting for a reboot, so
@@ -1729,18 +1725,14 @@ private fun SettingsPage(
         AutoRunRetryDialog(
             maxAttempts = autoRunStatus.maxAttempts,
             baseDelaySeconds = bootDelayValue,
+            canPostNotifications = canPostNotifications,
+            onRequestNotifications = requestNotificationPermission,
+            sendTestNotification = sendTestNotification,
             onDismiss = { showAutoRunRetryDialog = false },
             onConfirm = { attempts ->
                 showAutoRunRetryDialog = false
                 onAutoRunMaxAttemptsChanged(attempts)
             },
-        )
-    }
-
-    if (showNotificationDialog) {
-        NotificationPermissionDialog(
-            onDismiss = { showNotificationDialog = false },
-            onGrant = requestNotificationPermission,
         )
     }
 
@@ -1902,53 +1894,16 @@ private fun SettingsPage(
                     onRunNow = onAutoRunRunNow,
                     onReset = onAutoRunReset,
                 )
-                SettingsCard(
-                    icon = Icons.Rounded.Replay,
-                    title = stringResource(R.string.auto_run_retry),
-                    description = stringResource(R.string.auto_run_retry_description),
-                    valueBelow = stringResource(
-                        R.string.auto_run_retry_summary,
-                        autoRunStatus.maxAttempts,
-                        formatDelayLabel(AutoRunPolicy.retryDelaySeconds(bootDelay, 1)),
-                        formatDelayLabel(
-                            AutoRunPolicy.retryDelaySeconds(bootDelay, autoRunStatus.maxAttempts),
-                        ),
-                    ),
+                AutoRunPolicyCard(
+                    status = autoRunStatus,
+                    baseDelaySeconds = bootDelay,
+                    canPostNotifications = canPostNotifications,
                     position = SettingsCardPosition.Middle,
                     onClick = {
                         clickHaptic(view)
                         showAutoRunRetryDialog = true
                     },
                 )
-                if (!canPostNotifications) {
-                    SettingsCard(
-                        icon = Icons.Rounded.Notifications,
-                        title = stringResource(R.string.auto_run_notifications),
-                        description = stringResource(R.string.auto_run_notifications_description),
-                        value = stringResource(R.string.action_allow),
-                        position = SettingsCardPosition.Middle,
-                        onClick = {
-                            clickHaptic(view)
-                            showNotificationDialog = true
-                        },
-                    )
-                } else {
-                    // Granted, but still worth proving the channel is not muted
-                    // at the OS level: a blocked channel fails silently too.
-                    SettingsCard(
-                        icon = Icons.Rounded.Notifications,
-                        title = stringResource(R.string.auto_run_notifications),
-                        description = stringResource(
-                            R.string.auto_run_notifications_ready_description,
-                        ),
-                        value = stringResource(R.string.auto_run_notify_test),
-                        position = SettingsCardPosition.Middle,
-                        onClick = {
-                            clickHaptic(view)
-                            sendTestNotification()
-                        },
-                    )
-                }
                 SettingsSwitchCard(
                     icon = Icons.Rounded.Save,
                     title = stringResource(R.string.payloads_save),

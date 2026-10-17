@@ -6,15 +6,16 @@ import android.view.HapticFeedbackConstants
 import android.view.View
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Replay
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -90,6 +91,49 @@ internal fun AutoRunStatusCard(
 }
 
 /**
+ * Retry budget and notification reachability behind one tap.
+ *
+ * These used to be three separate cards, which turned a two-setting feature
+ * into five rows in the list. They are both "conditions the loop needs to be
+ * able to run", so they belong together; the notification row only appears
+ * while notifications are blocked, since there is nothing to configure once
+ * they work.
+ */
+@Composable
+internal fun AutoRunPolicyCard(
+    status: AutoRunStatus,
+    baseDelaySeconds: Int,
+    canPostNotifications: Boolean,
+    position: SettingsCardPosition,
+    onClick: () -> Unit,
+) {
+    val details = buildString {
+        append(
+            stringResource(
+                R.string.auto_run_retry_summary,
+                status.maxAttempts,
+                formatDelayLabel(AutoRunPolicy.retryDelaySeconds(baseDelaySeconds, 1)),
+                formatDelayLabel(
+                    AutoRunPolicy.retryDelaySeconds(baseDelaySeconds, status.maxAttempts),
+                ),
+            ),
+        )
+        if (!canPostNotifications) {
+            append("\n")
+            append(stringResource(R.string.auto_run_notifications_blocked))
+        }
+    }
+    SettingsCard(
+        icon = Icons.Rounded.Replay,
+        title = stringResource(R.string.auto_run_policy),
+        description = stringResource(R.string.auto_run_policy_description),
+        valueBelow = details,
+        position = position,
+        onClick = onClick,
+    )
+}
+
+/**
  * Resolves the pending alarm into a wall-clock time for display. Exposed
  * separately from [AutoRunManager.nextRunWallClockMillis] so the UI can render
  * a status snapshot it already holds without re-reading preferences.
@@ -145,13 +189,18 @@ internal fun formatDelayLabel(seconds: Int): String {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun AutoRunRetryDialog(
     maxAttempts: Int,
     baseDelaySeconds: Int,
+    canPostNotifications: Boolean,
+    onRequestNotifications: () -> Unit,
+    sendTestNotification: () -> Unit,
     onDismiss: () -> Unit,
     onConfirm: (Int) -> Unit,
 ) {
+    val view = LocalView.current
     var attemptsValue by remember { mutableStateOf(maxAttempts.toString()) }
     var error by remember { mutableStateOf(false) }
     val rangeText = stringResource(
@@ -163,11 +212,11 @@ internal fun AutoRunRetryDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Rounded.Replay, contentDescription = null) },
-        title = { Text(stringResource(R.string.auto_run_retry)) },
+        title = { Text(stringResource(R.string.auto_run_policy)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    text = stringResource(R.string.auto_run_retry_description),
+                    text = stringResource(R.string.auto_run_policy_description),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -190,9 +239,10 @@ internal fun AutoRunRetryDialog(
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
-                Row(
+                FlowRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     QuickAttemptsButton(AutoRunPolicy.MIN_ATTEMPTS) { attemptsValue = it }
                     QuickAttemptsButton(AutoRunPolicy.DEFAULT_MAX_ATTEMPTS) { attemptsValue = it }
@@ -207,6 +257,35 @@ internal fun AutoRunRetryDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // Only actionable while notifications are blocked; once they
+                // work there is nothing to configure here.
+                if (!canPostNotifications) {
+                    HorizontalDivider()
+                    Text(
+                        text = stringResource(R.string.auto_run_notifications_blocked),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    FilledTonalButton(
+                        onClick = {
+                            clickHaptic(view)
+                            onRequestNotifications()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(stringResource(R.string.action_allow))
+                    }
+                } else {
+                    TextButton(
+                        onClick = {
+                            clickHaptic(view)
+                            sendTestNotification()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(stringResource(R.string.auto_run_notify_test))
+                    }
+                }
             }
         },
         confirmButton = {
@@ -235,52 +314,10 @@ internal fun AutoRunRetryDialog(
 
 @Composable
 private fun QuickAttemptsButton(attempts: Int, onPick: (String) -> Unit) {
-    Button(
+    FilterChip(
+        selected = false,
         onClick = { onPick(attempts.toString()) },
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-    ) {
-        Text(
-            text = stringResource(R.string.auto_run_retry_attempts_value, attempts),
-            style = MaterialTheme.typography.labelMedium,
-        )
-    }
-}
-
-/**
- * Shown only when notifications are blocked. Without them auto-run still arms,
- * but the user is never told a run is waiting, so the exploit cannot reach the
- * foreground it needs.
- */
-@Composable
-internal fun NotificationPermissionDialog(
-    onDismiss: () -> Unit,
-    onGrant: () -> Unit,
-) {
-    val view = LocalView.current
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        icon = { Icon(Icons.Rounded.Notifications, contentDescription = null) },
-        title = { Text(stringResource(R.string.auto_run_notify_title)) },
-        text = {
-            Text(
-                text = stringResource(R.string.auto_run_notify_permission_body),
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        },
-        confirmButton = {
-            FilledTonalButton(onClick = {
-                clickHaptic(view)
-                onGrant()
-            }) {
-                Text(stringResource(R.string.action_allow))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.action_cancel))
-            }
-        },
+        label = { Text(stringResource(R.string.auto_run_retry_attempts_value, attempts)) },
     )
 }
 

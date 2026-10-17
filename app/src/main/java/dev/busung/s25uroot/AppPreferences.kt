@@ -45,8 +45,11 @@ object AppPreferences {
     const val DEFAULT_PAYLOAD_REPOSITORY = "BuSung-dev/Root-My-Galaxy-Payloads"
     const val DEFAULT_PAYLOAD_BRANCH = "main"
     const val DEFAULT_BOOT_DELAY = 60
-    const val MIN_BOOT_DELAY = 60
+    const val MIN_BOOT_DELAY = 20
     const val MAX_BOOT_DELAY = 120
+
+    /** Offered as one-tap chips in the boot delay dialog. */
+    val BOOT_DELAY_PRESETS = intArrayOf(20, 30, 50, 90, 120)
 
     fun payloadRepository(context: Context): String =
         prefs(context).getString(PAYLOAD_REPOSITORY, DEFAULT_PAYLOAD_REPOSITORY)

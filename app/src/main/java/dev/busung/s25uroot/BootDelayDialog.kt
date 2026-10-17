@@ -3,11 +3,13 @@ package dev.busung.s25uroot
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -18,17 +20,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun BootDelayDialog(
     currentDelay: Int,
     minDelay: Int,
     maxDelay: Int,
+    presets: List<Int> = AppPreferences.BOOT_DELAY_PRESETS.toList(),
     onDismiss: () -> Unit,
     onConfirm: (Int) -> Unit,
 ) {
@@ -75,25 +77,18 @@ internal fun BootDelayDialog(
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
-                Row(
+                FlowRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    QuickDelayButton(
-                        delay = minDelay,
-                        selected = currentDelay == minDelay,
-                        onClick = { delayValue = minDelay.toString(); error = false }
-                    )
-                    QuickDelayButton(
-                        delay = (minDelay + maxDelay) / 2,
-                        selected = currentDelay == (minDelay + maxDelay) / 2,
-                        onClick = { delayValue = ((minDelay + maxDelay) / 2).toString(); error = false }
-                    )
-                    QuickDelayButton(
-                        delay = maxDelay,
-                        selected = currentDelay == maxDelay,
-                        onClick = { delayValue = maxDelay.toString(); error = false }
-                    )
+                    presets.forEach { preset ->
+                        QuickDelayButton(
+                            delay = preset,
+                            selected = preset == currentDelay,
+                            onClick = { delayValue = preset.toString(); error = false }
+                        )
+                    }
                 }
             }
         },
@@ -125,15 +120,9 @@ private fun QuickDelayButton(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
-    Button(
+    FilterChip(
+        selected = selected,
         onClick = onClick,
-        modifier = Modifier
-            .fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-    ) {
-        Text(
-            text = stringResource(R.string.boot_delay_seconds, delay),
-            style = MaterialTheme.typography.labelMedium,
-        )
-    }
+        label = { Text(stringResource(R.string.boot_delay_seconds, delay)) },
+    )
 }
